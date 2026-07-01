@@ -115,7 +115,6 @@ nav{background:var(--steel-900);position:sticky;top:0;z-index:100;border-bottom:
 .submit-btn{width:100%;background:var(--steel-950);color:#fff;padding:15px;border-radius:8px;border:none;font-weight:700;font-size:15px;font-family:inherit;cursor:pointer;margin-top:0.5rem;transition:background .2s;}
 .submit-btn:hover{background:var(--brass-dark);}
 .form-note{font-size:11.5px;color:var(--steel-400);text-align:center;margin-top:10px;}
-.panel-note{background:#fff7ea;border:1px solid var(--brass-light);border-radius:8px;padding:0.85rem 1.1rem;font-size:12.5px;color:var(--brass-dark);margin-bottom:1.5rem;display:flex;gap:8px;align-items:flex-start;}
 .testi-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1.5rem;}
 .testi-card{background:#fff;border:1px solid var(--steel-100);border-radius:10px;padding:1.75rem;}
 .testi-stars{color:var(--brass);font-size:14px;margin-bottom:0.85rem;letter-spacing:2px;}
@@ -327,6 +326,7 @@ footer{background:var(--steel-900);color:var(--steel-400);padding:2rem 1.5rem;te
         <p style="color:#047857;font-size:13px;margin-top:4px;">کارشناسان ما در کمتر از ۲ ساعت باهاتون تماس می‌گیرن.</p>
       </div>
       <div id="form-error" style="display:none;background:#fff5f5;border:1px solid #fc8181;border-radius:8px;padding:1rem;margin-bottom:1.25rem;color:#c53030;font-size:13px;"></div>
+      
       <div class="form-grid-2">
         <div class="form-row"><label>نام و نام خانوادگی</label><input id="field-name" type="text" placeholder="مثلاً: علی محمدی"></div>
         <div class="form-row"><label>شماره تماس</label><input id="field-phone" type="tel" placeholder="۰۹۱۲۳۴۵۶۷۸۹"></div>
@@ -349,13 +349,17 @@ footer{background:var(--steel-900);color:var(--steel-400);padding:2rem 1.5rem;te
         <label>توضیحات سفارش</label>
         <textarea id="field-description" placeholder="ابعاد قطعه، تلرانس مورد نیاز و سایر جزئیات..."></textarea>
       </div>
+      
+      <!-- باکس آپلود واقعی -->
       <div class="form-row">
         <label>آپلود نقشه یا عکس قطعه</label>
-        <div class="upload-box">
+        <div class="upload-box" id="upload-area" onclick="document.getElementById('field-file').click()">
           <svg class="up-icon" viewBox="0 0 24 24" fill="none"><path d="M12 16V4M12 4L7 9M12 4L17 9" stroke="#8a9098" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 16V19C4 20 5 21 6 21H18C19 21 20 20 20 19V16" stroke="#8a9098" stroke-width="2" stroke-linecap="round"/></svg>
-          <span>فایل را بکشید یا کلیک کنید (PDF, JPG, PNG)</span>
+          <span id="upload-text">فایل را بکشید یا کلیک کنید (PDF, JPG, PNG)</span>
+          <input type="file" id="field-file" accept=".jpg,.jpeg,.png,.pdf" style="display:none;" onchange="handleFileSelect(this)">
         </div>
       </div>
+
       <button class="submit-btn" id="submit-btn" type="button" onclick="submitOrder()">ثبت سفارش</button>
       <div class="form-note">با ثبت سفارش، قوانین و مقررات سایت رو می‌پذیرید</div>
     </div>
@@ -432,13 +436,21 @@ for(let i=0;i<24;i++){
   ticks.appendChild(t);
 }
 
+// ── Upload UI Logic ──
+let selectedFile = null;
+function handleFileSelect(input) {
+  if (input.files && input.files[0]) {
+    selectedFile = input.files[0];
+    document.getElementById('upload-text').textContent = 'فایل انتخاب شد: ' + selectedFile.name;
+  }
+}
+
 // ── Submit order ──
 async function submitOrder(){
   const btn = document.getElementById('submit-btn');
   const successBox = document.getElementById('form-success');
   const errorBox = document.getElementById('form-error');
 
-  // Get values
   const name = document.getElementById('field-name').value.trim();
   const phone = document.getElementById('field-phone').value.trim();
   const service = document.getElementById('field-service').value;
@@ -446,19 +458,37 @@ async function submitOrder(){
   const quantity = parseInt(document.getElementById('field-quantity').value) || 1;
   const description = document.getElementById('field-description').value.trim();
 
-  // Validate
   if(!name || !phone){
     errorBox.textContent = '⚠️ لطفاً نام و شماره تماس رو وارد کنید.';
     errorBox.style.display = 'block';
     return;
   }
 
-  // Loading state
-  btn.textContent = 'در حال ثبت...';
+  btn.textContent = 'در حال آپلود و ثبت...';
   btn.disabled = true;
   errorBox.style.display = 'none';
 
   try {
+    let fileUrl = null;
+
+    // اگر فایلی انتخاب شده بود، اول آپلود میکنیم
+    if (selectedFile) {
+      // ساخت یک اسم یکتا برای فایل تا جلوی تداخل گرفته بشه
+      const fileExt = selectedFile.name.split('.').pop();
+      const filePath = `${phone}_${Date.now()}.${fileExt}`;
+
+      const { data: uploadData, error: uploadError } = await db.storage
+        .from('order-files')
+        .upload(filePath, selectedFile);
+
+      if (uploadError) throw new Error('خطا در آپلود فایل: ' + uploadError.message);
+
+      // گرفتن لینک عمومی فایل
+      const { data: urlData } = db.storage.from('order-files').getPublicUrl(filePath);
+      fileUrl = urlData.publicUrl;
+    }
+
+    // ثبت اطلاعات در دیتابیس
     const { error } = await db.from('orders').insert([{
       full_name: name,
       phone: phone,
@@ -466,34 +496,34 @@ async function submitOrder(){
       part_material: material,
       quantity: quantity,
       description: description,
-      status: 'جدید'
+      status: 'جدید',
+      file_url: fileUrl
     }]);
 
     if(error) throw error;
 
-    // Send Telegram notification
+    // ارسال پیام به تلگرام
     const BOT_TOKEN = '8908700785:AAGSfSeWjmldHcGeDccOJ_Pao6vz0Ps5t5Q';
     const CHAT_ID = '7759814343';
-    const msg = `🔔 سفارش جدید!\n\n👤 نام: ${name}\n📞 تلفن: ${phone}\n🔧 خدمت: ${service}\n⚙️ جنس: ${material || '-'}\n🔢 تعداد: ${quantity}\n📝 توضیحات: ${description || '-'}`;
+    const msg = `🔔 سفارش جدید!\n\n👤 نام: ${name}\n📞 تلفن: ${phone}\n🔧 خدمت: ${service}\n⚙️ جنس: ${material || '-'}\n🔢 تعداد: ${quantity}\n📝 توضیحات: ${description || '-'}\n📎 فایل: ${fileUrl || 'ندارد'}`;
     fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({chat_id: CHAT_ID, text: msg})
     });
 
-    // Success
     successBox.style.display = 'block';
-    // Reset form
-    ['field-name','field-phone','field-material','field-description'].forEach(id=>{
-      document.getElementById(id).value = '';
-    });
+    ['field-name','field-phone','field-material','field-description'].forEach(id=>{ document.getElementById(id).value = ''; });
     document.getElementById('field-quantity').value = '';
+    document.getElementById('upload-text').textContent = 'فایل را بکشید یا کلیک کنید (PDF, JPG, PNG)';
+    selectedFile = null;
+    
     btn.textContent = 'ثبت سفارش جدید';
     btn.disabled = false;
     btn.onclick = ()=>{ successBox.style.display='none'; btn.textContent='ثبت سفارش'; btn.onclick=submitOrder; };
 
   } catch(err){
-    errorBox.textContent = '❌ خطا در ثبت سفارش: ' + (err.message || 'لطفاً دوباره امتحان کنید.');
+    errorBox.textContent = '❌ خطا: ' + (err.message || 'لطفاً دوباره امتحان کنید.');
     errorBox.style.display = 'block';
     btn.textContent = 'ثبت سفارش';
     btn.disabled = false;
